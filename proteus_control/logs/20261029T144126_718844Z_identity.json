@@ -1,0 +1,10 @@
+{
+  "time_utc": "2026-10-29T14:41:26.718844+00:00",
+  "connection": {
+    "host": "192.168.2.2",
+    "port": 5025,
+    "timeout_seconds": 5
+  },
+  "identity": "Tabor Electronics,P9484M,000002233113,1.240.22 --slot#: 5,",
+  "options": "8M2,LTJ2,G2,DUC,AWT,STM,FPGA_PROG"
+}
