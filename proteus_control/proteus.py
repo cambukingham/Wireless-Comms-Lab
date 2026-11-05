@@ -1,7 +1,7 @@
-"""Small read-only SCPI connection for the first Proteus experiment.
+"""Small SCPI connection, read-only unless allow_writes=True.
 
 Uses Python's standard library; VISA and vendor drivers are not needed for
-these text queries. Waveform transfers will need a separate binary-data API.
+text queries and definite-length binary waveform uploads.
 """
 
 import socket

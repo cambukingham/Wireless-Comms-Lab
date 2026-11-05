@@ -14,14 +14,14 @@ from pathlib import Path
 
 from proteus import Proteus
 
-SAMPLE_RATE = 1_000_000_000
-TONE_HZ = 10_000_000
-AMPLITUDE_VPP = 0.2
-SAMPLE_COUNT = 3200  # 32 complete cycles; multiple of 64 samples.
+SAMPLE_RATE = 1_000_000_000 # 1 G/s
+TONE_HZ = 100_000_000 # 100 MHz
+AMPLITUDE_VPP = 0.2  # 100 mV amplitude
+SAMPLE_COUNT = 32000  # 32 cycles
 
 
 def setup(instrument):
-    # Direct DAC playback avoids the RF upconverter used by the Wi-Fi demos.
+    # Direct DAC playback avoids RF upconverter
     for command in (
         ":SOUR:MODE DIRECT",
         ":SOUR:INT NONE",
@@ -89,7 +89,7 @@ def main():
             instrument.check_error()
             print(f"CH1 output state: {state}")
             if args.action == "start":
-                print("Tone running: 10 MHz, 0.2 Vpp, zero offset, into 50 ohms.")
+                print(f"Tone running: {TONE_HZ:g} Hz, {AMPLITUDE_VPP:g} Vpp, zero offset, into 50 ohms.")
                 print("To stop: run this script with stop, or switch CH1 output off on the chassis.")
             else:
                 print("CH1 output OFF.")
