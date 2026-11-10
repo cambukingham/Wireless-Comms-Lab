@@ -781,7 +781,7 @@ class TEProteusInst(object):
         '''
         scpi_str = str(scpi_str).encode()
         str_ptr = ct.c_char_p(scpi_str)
-        max_resp_len = np.int(max_resp_len)
+        max_resp_len = int(max_resp_len)
         resp_buf = ct.create_string_buffer(max_resp_len)
         max_resp_len = np.uint32(max_resp_len)
 

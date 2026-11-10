@@ -1,0 +1,3 @@
+# Analysis/runtime dependency; Tkinter comes with the Windows Python installer.
+# This version is tested with Python 3.12 on the lab laptop.
+numpy==2.3.5

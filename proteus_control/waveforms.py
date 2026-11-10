@@ -8,7 +8,20 @@ SAMPLE_RATE = 1_000_000_000
 SHAPES = ("sine", "square", "triangle", "sawtooth", "pulse")
 
 
-def generate(shape, frequency, duty=0.5, falling=False):
+def delay_samples(delay_ns, sample_rate):
+    """Round a requested positive delay to the nearest sample."""
+    if not 0 <= delay_ns <= 1_000_000:
+        raise ValueError("Use a record delay from 0 to 1,000,000 ns.")
+    return round(delay_ns * sample_rate / 1e9)
+
+
+def delay_record(record, samples, stride=1):
+    """Circularly delay values or a packed record with stride bytes per sample."""
+    shift = (samples * stride) % len(record)
+    return record[-shift:] + record[:-shift] if shift else record
+
+
+def plan_waveform(shape, frequency, duty=0.5):
     if shape not in SHAPES:
         raise ValueError("Unknown waveform shape.")
     if not math.isfinite(frequency) or not 0 < frequency <= 100_000_000:
@@ -23,6 +36,11 @@ def generate(shape, frequency, duty=0.5, falling=False):
         raise ValueError("Exact frequency needs too much memory; try a rounder frequency, e.g. 1e6.")
     if shape in ("square", "pulse") and min(duty, 1-duty) * SAMPLE_RATE / frequency < 2:
         raise ValueError("High and low intervals must each span at least two samples.")
+    return count, ratio
+
+
+def generate(shape, frequency, duty=0.5, falling=False):
+    count, ratio = plan_waveform(shape, frequency, duty)
     values = []
     for n in range(count):
         phase = ((n * ratio.numerator) % ratio.denominator) / ratio.denominator

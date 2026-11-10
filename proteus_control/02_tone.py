@@ -1,4 +1,4 @@
-"""CH1 scope test: 10 MHz sine, 0.2 Vpp into 50 ohms, zero offset.
+"""CH1 sine playback into a 50-ohm load.
 
 Usage: python 02_tone.py setup|start|stop
 setup uploads with output OFF; start repeats setup then enables CH1.
@@ -75,7 +75,7 @@ def main():
             if args.action != "stop":
                 setup(instrument)
             if args.action == "start":
-                # Verify settings before allowing a signal onto the scope cable.
+                # Verify settings before enabling CH1.
                 rate = float(instrument.query(":FREQ:RAST?"))
                 voltage = float(instrument.query(":SOUR:VOLT?"))
                 offset = float(instrument.query(":SOUR:VOLT:OFFS?"))
