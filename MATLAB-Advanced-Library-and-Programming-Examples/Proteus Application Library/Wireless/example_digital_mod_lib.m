@@ -1,0 +1,365 @@
+% Baseband DUC example
+% This is an example of how to generate signals and RF modulated signals
+% simultenouely with the Proteus AWT. All the IQ Modes are supported and
+% different types of signals are generated. A clock signal is also
+% generated when modulation is QPSK/QAM
+
+clear;
+close all;
+clear variables;
+clear global;
+clc;
+
+% CREATE PROTEUS OBJECTS
+proteus_lib = TEProteusLib();
+awg_setup   = proteus_lib.CreateDefaultAwgSetup();
+mod_setup   = proteus_lib.CreateDefaultModSetup();
+mtone_setup = proteus_lib.CreateDefaultMtoneSetup();
+
+% SIGNAL PARAMETERS FOR CARRIER #1, QAM GENERATION
+carrier_frequency       = 1.0E9;
+carrier_frequency_2     = 1.5E9; % For IQ Mode TWO
+wfmVolt                 = 1.3;
+iq_mode                 = proteus_lib.AWG_IQ_MODE_ONE;
+mod_type                = proteus_lib.MOD_SCHEME_QPSK;
+num_of_symbols          = 2^16;
+symbol_rate             = 100E6;
+oversampling            = 2; % Baseband waveform sample rate calculation
+filter_type             = proteus_lib.MOD_BB_FILTER_SQRT;
+roll_off                = 0.35;
+
+dac_sampling_rate       = 9E9;
+duc_interpol            = proteus_lib.AWG_INTERPOL_X8;
+
+% Define IP Address for Target Proteus device descriptor
+% VISA "Socket-Based" TCP-IP Device. Socket# = 5025
+proteus_lib.ip_addr         = '127.0.0.1'; % '127.0.0.1' = Local Host, your IP address here
+proteus_lib.pxi_slot        = 5; % Set 0 to select slot from attached modules
+proteus_lib.com_ifc         = proteus_lib.COMM_IFC_DLL; %"LAN" = VISA or "DLL" = PXI
+proteus_lib.paranoia_level  = 2; % 0, 1 or 2
+
+% Instrument setup
+[inst, idnstr, slotNumber, serial] = proteus_lib.ConnecToProteus();
+% inst handler required to use TEProteusInst.m functions directly
+
+num_of_modules = length(idnstr);
+
+% Report model
+for module_ptr = 1:num_of_modules
+    fprintf('Connected to: %s, slot: %d\n', idnstr(module_ptr), slotNumber(module_ptr));
+end
+
+% Get options using the standard IEEE-488.2 Command
+optstr = proteus_lib.GetProteusOptions();
+
+% AWG Settings
+awg_setup.sel_module                    = proteus_lib.PROTEUS_MODULE_01;
+awg_setup.channel                       = proteus_lib.AWG_CHAN_CH01;
+awg_setup.segment                       = 1;
+awg_setup.mode                          = proteus_lib.AWG_MODE_DUC;
+awg_setup.iq_mode                       = iq_mode;
+awg_setup.interpol                      = duc_interpol;
+awg_setup.sampling_rate                 = dac_sampling_rate;
+awg_setup.volt                          = wfmVolt;
+awg_setup.six_db1                       = true;
+awg_setup.six_db2                       = true;
+
+% Type of signal for test
+% 0 = I/Q Files, 1 = 802.11be, 2 = 802.11ax, 3 = 802.11ad, 4 = Multi-Tone,
+% 5 = QAM / FSK / MSK
+signal_type                             = 5; 
+awg_setup.cfr1                          = carrier_frequency;
+awg_setup.cfr2                          = carrier_frequency_2; % For IQ Mode 2
+
+% Check valid range for selected module
+if awg_setup.sel_module < 1 && proteus_lib.com_ifc == proteus_lib.COMM_IFC_LAN
+    awg_setup.sel_module = 1;
+elseif awg_setup.sel_module > num_of_modules && proteus_lib.com_ifc == proteus_lib.COMM_IFC_LAN
+    awg_setup.sel_module = num_of_modules;
+elseif proteus_lib.com_ifc == proteus_lib.COMM_IFC_DLL
+    awg_setup.sel_module = 1;
+end
+% Select Module when Connecting to TaborInstrumentation service (LAN)
+if proteus_lib.com_ifc == proteus_lib.COMM_IFC_LAN
+    proteus_lib.SelectModule(awg_setup.sel_module);
+end
+% Selected module reported
+fprintf('\nModule: %s, slot: %d Selected\n',...
+        idnstr(awg_setup.sel_module),...
+        slotNumber(awg_setup.sel_module));
+
+% Reset AWG
+inst.SendScpi('*CLS;*RST');
+
+% Get granularity
+granul = proteus_lib.GetGranularity(idnstr(awg_setup.sel_module), optstr, awg_setup.dac_resolution);
+
+fprintf('\nGranularity = %d samples\n', granul);
+
+actual_granularity = granul;
+
+switch iq_mode                 
+    case proteus_lib.AWG_IQ_MODE_HALF
+        actual_granularity = granul;
+
+    case proteus_lib.AWG_IQ_MODE_ONE
+        actual_granularity = granul / 2;
+
+    case proteus_lib.AWG_IQ_MODE_TWO
+        actual_granularity = granul / 4;
+end
+
+fprintf('\nActual Granularity = %d samples\n', actual_granularity);
+
+% Get min and max sampling rates
+[minsr, maxsr] = proteus_lib.GetAwgSamplingRateRange();
+% Check if sample rate is in the valid range, take corrective action if not
+if awg_setup.sampling_rate < minsr
+    awg_setup.sampling_rate = minsr;    
+elseif awg_setup.sampling_rate > maxsr
+    awg_setup.sampling_rate = maxsr;
+end
+
+fprintf('Sampling Rate = %dGS/s\n', awg_setup.sampling_rate / 1E9);
+fprintf('Interpolation Factor = X%d\n', awg_setup.interpol);
+
+% Get min and max output voltage
+[minvolt, maxvolt] = proteus_lib.GetAwgVoltageRange();
+% Check if voltage is in the valid range, take corrective action if not
+if awg_setup.volt < minvolt
+   awg_setup.volt = minvolt; 
+elseif awg_setup.volt > maxvolt
+    awg_setup.volt = maxvolt;
+end
+
+fprintf('Vpp = %dmV\n', awg_setup.volt * 1E3);
+
+fprintf(1, 'BASEBAND WAVEFORM CALCULATION\n');
+
+% Baseband waveform parameter definition
+switch signal_type
+    case 0
+        file_I_name                     = "myWfmI.csv";
+        file_Q_name                     = "myWfmQ.csv";
+        sample_rate_bb_in               = 200E6;       
+       
+        wfm_in                          = readmatrix(file_I_name);
+        wfm_in_2                        = readmatrix(file_Q_name);
+
+        wfm_in                          = wfm_in + 1i * wfm_in_2;
+        wfm_in                          = wfm_in';        
+        wfm_in_2                        = wfm_in;
+
+    case 1        
+        actual_granularity              = 16;       
+        
+        [wfm_in, sample_rate_bb_in]     = Get_Wlan_be(oversampling);
+        wfm_in_2                        = wfm_in;
+
+    case 2        
+        bw  = 'CBW80'; % bw = CBW20 CBW40 CBW80 CBW160
+        mcs = 5; 
+        % 0 = BPSK(1/2), 1 = QPSK(1/2), 2 = QPSK(3/4), 3 = 16QAM(1/2)
+        % 4 = 16QAM(3/4), 5 = 64QAM(2/3), 6 = 64QAM(3/4), 7 = 64QAM(5/6)
+        % 8 = 256QAM(3/4), 9 = 256QAM(5/6), 10 = 1024QAM(3/4), 11 =
+        % 1024QAM(5/6)
+
+        [wfm_in, sample_rate_bb_in]     = Get_Wlan_ax(bw, oversampling, mcs);
+        wfm_in_2                        = wfm_in;
+
+    case 3
+        awg_setup.iq_mode               = proteus_lib.IQ_MODE_HALF; % 2GHz Modulation BW required      
+        
+        [wfm_in, sample_rate_bb_in]     = Get_Wlan_ad;
+
+    case 4        
+        mtone_setup.num_of_tones        = 40;
+        mtone_setup.offset_tone         = 15;
+        mtone_setup.spacing             = 1E6;
+        mtone_setup.oversampling        = oversampling;
+        mtone_setup.phase.distr         = proteus_lib.MTONE_PHASE_NEWMAN;
+
+        [wfm_in, sample_rate_bb_in]     = obj.GetMultiTone(mtone_setup);
+        wfm_in_2                        = wfm_in;
+        
+    case 5                      
+        % Modulation Settings
+        mod_setup.mod_type              = mod_type;
+        mod_setup.num_of_symbols        = num_of_symbols;
+        mod_setup.symbol_rate           = symbol_rate;
+        mod_setup.filter_type           = filter_type;
+        mod_setup.roll_off              = roll_off;
+        mod_setup.oversampling          = oversampling;
+
+        [wfm_in, sample_rate_bb_in]     = proteus_lib.GetModWfm(mod_setup);
+
+        wfm_in_2                        = wfm_in;
+        sample_rate_bb_in_2             = sample_rate_bb_in;
+
+        % For QAM and clock baseband signal, clock waveform must be calculated
+        baseband_wfm = proteus_lib.GetQamClock( mod_setup, 4);                     
+end
+
+% Resampling must be carrier out for the DUC baseband sampling rate
+sample_rate_bb_out = awg_setup.sampling_rate / awg_setup.interpol; 
+wfm_length_in = length(wfm_in);
+
+%Calculation of lenght of the interpolated waveform
+wfm_length_out = floor(wfm_length_in * sample_rate_bb_out /...
+    (sample_rate_bb_in * actual_granularity)) * actual_granularity;
+
+fprintf(1, 'BASEBAND WAVEFORM RESAMPLING\n');
+
+%%%%%%%%%%%%%%%%%%%%%       RESAMPLING      %%%%%%%%%%%%%%%%%%%%%%%%%
+tic;
+wfm_out = proteus_lib.ResamplingDirect(wfm_in, wfm_length_out, true);
+if awg_setup.iq_mode == proteus_lib.AWG_IQ_MODE_TWO
+    wfm_out_2 = proteus_lib.ResamplingDirect(wfm_in_2, wfm_length_out, true);
+end
+
+% Resampling Clock Waveform
+if signal_type == 5
+    % Clock waveform resampling
+    baseband_wfm = proteus_lib.ResamplingDirect(baseband_wfm, wfm_length_out, true);
+end
+toc;
+
+% Sample rate must be corected to compensate for the timing error
+% introduced by the granularity requirements
+actual_dac_sample_rate = wfm_length_out * awg_setup.interpol *...
+    sample_rate_bb_in / wfm_length_in;
+
+%%%%%%%%%%%%%%%%%%%%%%%%% DOWNLOAD RF WAVEFORM %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+fprintf(1, 'RF WAVEFORM DOWNLOAD AND ACTIVATION\n');
+% All previous waveforms will be deleted from waveform memory 
+inst.SendScpi(':TRAC:DEL:ALL');
+% Format and download RF Signal
+switch awg_setup.iq_mode 
+    case proteus_lib.AWG_IQ_MODE_HALF
+        result = proteus_lib.SendIqmHalfWfm( awg_setup,...                                            
+                                            wfm_out);
+
+    case proteus_lib.AWG_IQ_MODE_ONE
+        result = proteus_lib.SendIqmOneWfm( awg_setup,...                                            
+                                            wfm_out);        
+
+        % Markers
+        mkrDiv = 1;
+           
+        myMkr1 = uint8(zeros(1, length(wfm_out) / mkrDiv));
+        myMkr1(1) = uint8(1); % Sync marker duration depends on the channel
+        myMkr2 = rand(1, length(myMkr1)); % Random data is different for each channel
+        myMkr2 = uint8(myMkr2 > 0.5);        
+
+        myMkr = proteus_lib.FormatMkr2(awg_setup.dac_resolution, myMkr1, myMkr2);
+        proteus_lib.SendMkrToProteus(awg_setup, myMkr);
+
+    case proteus_lib.AWG_IQ_MODE_TWO
+        result = proteus_lib.SendIqmTwoWfm( awg_setup,...
+                                            wfm_out,...
+                                            wfm_out_2);
+end
+
+%inst.SendScpi('*RST');
+
+%%%%%%%%%%%%%%%%%%%%%%%%% DOWNLOAD BB WAVEFORM %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Format and download Baseband (Envelope or Clock) Signal
+fprintf(1, 'BASEBAND WAVEFORM DOWNLOAD AND ACTIVATION\n');
+if signal_type == 5 && awg_setup.iq_mode == proteus_lib.AWG_IQ_MODE_ONE
+    awg_setup.cfr1 = 0.0;
+    awg_setup.channel = awg_setup.channel + 1;
+    awg_setup.segment = awg_setup.segment + 1;
+
+    result = proteus_lib.SendIqmOneWfm( awg_setup,...                                            
+                                        baseband_wfm);      
+end  
+
+% Disconnect, close VISA handle and destroy handle  
+proteus_lib.DisconnectFromProteus();
+
+clear inst;
+close all;
+
+function [waveform, Fs] = Get_Wlan_ad()
+% Generated by MATLAB(R) 9.14 (R2023a) and WLAN Toolbox 3.6 (R2023a).
+% Generated on: 19-Apr-2023 18:52:47
+
+    %% Generating 802.11ad waveform
+    % 802.11ad configuration
+    dmgCfg = wlanDMGConfig('MCS', '16', ...
+        'TrainingLength', 0, ...
+        'TonePairingType', 'Static', ...
+        'PSDULength', 1000, ...
+        'AggregatedMPDU', false, ...
+        'LastRSSI', 0, ...
+        'Turnaround', false);
+    
+    num_of_packets = 1;
+    idle_time = 2E-6;
+    % input bit source:
+    in = randi([0, 1], 1000, 1);    
+    
+    % Generation
+    waveform = wlanWaveformGenerator(in, dmgCfg, ...
+        'NumPackets', num_of_packets, ...
+        'IdleTime', idle_time, ...
+        'WindowTransitionTime', 6.0606e-09, ...
+        'ScramblerInitialization', 2);
+    
+    Fs = wlanSampleRate(dmgCfg); % Specify the sample rate of the waveform in Hz
+end
+
+function [waveform, Fs] = Get_Wlan_be(oversampling)
+    cfgSU = wlanEHTMUConfig('CBW320');
+    numTx = 1; % Number of transmit antennas
+    cfgSU.NumTransmitAntennas = numTx; 
+    
+    cfgSU.User{1}.APEPLength = 8000; % A-MPDU length pre-EOF padding, in bytes
+    cfgSU.User{1}.MCS = 12;          % Modulation and coding scheme
+    cfgSU.User{1}.NumSpaceTimeStreams = numTx;
+    
+    psdu = randi([0 1],psduLength(cfgSU)*8,1,'int8');    
+   
+    idleTime = 30e-6;
+    waveform = wlanWaveformGenerator(psdu,cfgSU,'OversamplingFactor',oversampling, 'IdleTime',idleTime);
+
+    Fs = wlanSampleRate(cfgSU, 'OversamplingFactor', oversampling);
+end
+
+function [waveform, Fs] = Get_Wlan_ax(bw, oversampling, mcs)
+    % bw = CBW20 CBW40 CBW80 CBW160
+    % 802.11ax configuration
+    heSUCfg = wlanHESUConfig('ChannelBandwidth', bw, ...
+        'NumTransmitAntennas', 1, ...
+        'NumSpaceTimeStreams', 1, ...
+        'SpatialMapping', 'Direct', ...
+        'PreHESpatialMapping', false, ...
+        'MCS', mcs, ...
+        'DCM', false, ...
+        'ChannelCoding', 'LDPC', ...
+        'APEPLength', 100, ... %100
+        'GuardInterval', 3.2, ...
+        'HELTFType', 4, ...
+        'UplinkIndication', false, ...
+        'BSSColor', 0, ...
+        'SpatialReuse', 0, ...
+        'TXOPDuration', 127, ... %127
+        'HighDoppler', false, ...
+        'NominalPacketPadding', 0);      
+
+    % input bit source:
+    in = randi([0, 1], 1000000, 1);    
+
+    num_of_packets = 8;
+    idle_time = 100E-6;
+    
+    % Generation
+    waveform = wlanWaveformGenerator(in, heSUCfg, ...
+        'NumPackets', num_of_packets, ...
+        'IdleTime', idle_time, ...
+        'OversamplingFactor', oversampling, ...
+        'ScramblerInitialization', 93, ...
+        'WindowTransitionTime', 1e-07);
+    
+    Fs = oversampling * wlanSampleRate(heSUCfg, 'OversamplingFactor', 1); 
+end
